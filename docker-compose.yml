@@ -1,0 +1,12 @@
+services:
+  # This defines our Redis database service
+  task-db:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    # This keeps our data safe even if the container stops
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
