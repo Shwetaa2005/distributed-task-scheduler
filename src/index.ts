@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import dotenv from 'dotenv';
 import { TaskSchema } from './schema.js';
 import { addTask } from './queue.js';
+import { startWorker } from './worker.js';
 
 dotenv.config();
 const app = express();
@@ -23,18 +24,40 @@ app.get('/ping', (req: Request, res: Response) => {
 
 // 4. Schedule Route
 app.post('/schedule', async (req: Request, res: Response) => {
-  console.log("-> Entering /schedule route");
+  console.log("-> 1. Route entered");
   try {
-    console.log("-> Body received:", req.body);
-    const validatedData = TaskSchema.parse(req.body);
+    const body = req.body;
     
-    const taskId = await addTask(validatedData);
-    console.log("-> Task created with ID:", taskId);
+    // Manual check BEFORE Zod touches it
+    if (!body.executeAt || !body.payload) {
+      return res.status(400).json({ error: "Missing executeAt or payload" });
+    }
+
+    console.log("-> 2. Attempting Zod parse");
+    const validatedData = TaskSchema.parse(body);
+    console.log("-> 3. Zod parse successful");
+
+    const executionTime = new Date(validatedData.executeAt).getTime();
+    const now = Date.now();
+
+    if (isNaN(executionTime)) {
+      return res.status(400).json({ error: "Invalid date format" });
+    }
+
+    if (executionTime <= now) {
+      return res.status(400).json({ error: "Cannot schedule in the past" });
+    }
+
+    const taskId = await addTask({
+        ...validatedData,
+        retries: body.retries || 0
+    });
     
     res.status(201).json({ success: true, taskId });
+
   } catch (error: any) {
-    console.error("-> Route Error:", error.message);
-    res.status(400).json({ error: error.message || "Invalid Task Data" });
+    console.error("-> CRASH DETAIL:", error.name, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
@@ -46,4 +69,11 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 DEBUG SERVER started on http://localhost:${PORT}`);
+});
+
+// Start the Worker loop
+startWorker();
+
+app.listen(PORT, () => {
+  console.log(`🚀 API Server & Worker running on http://localhost:${PORT}`);
 });
