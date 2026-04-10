@@ -1,49 +1,62 @@
 import redisClient from './redis.js';
 
 export const startWorker = () => {
-  console.log("👷 Worker Engine Started: Watching for due tasks...");
+  console.log("👷 Worker Engine Started: System is now fully functional.");
 
-  // We use setInterval to create a "Polling Loop"
   setInterval(async () => {
     try {
-      const now = Date.now(); // The current time in milliseconds
-
-      // 1. ZRANGEBYSCORE: Get tasks where score is between 0 and "now"
-      // This ignores all tasks scheduled for the future.
+      const now = Date.now();
       const taskIds = await redisClient.zrangebyscore('tasks:scheduled', 0, now);
 
       if (taskIds.length > 0) {
-        console.log(`🎯 Found ${taskIds.length} task(s) ready to run!`);
-
         for (const id of taskIds) {
-          // 2. Fetch the "Heavy" payload from the Hash using the ID
           const taskData = await redisClient.hgetall(`task:data:${id}`);
 
           if (Object.keys(taskData).length === 0) {
-            // Safety check: if data is missing, just remove the ID and move on
             await redisClient.zrem('tasks:scheduled', id);
             continue;
           }
 
-          // 3. SIMULATE EXECUTION
-          console.log(`-------------------------------------------`);
-          console.log(`🚀 EXECUTING TASK ID: ${id}`);
-          console.log(`📦 PAYLOAD:`, JSON.parse(taskData.payload));
-          console.log(`⏰ ORIGINALLY SCHEDULED FOR: ${taskData.executeAt}`);
-          
-          // In a real app, this is where you'd call an Email API or a Payment Gateway
-          console.log(`✅ Task processed successfully.`);
+          try {
+            console.log(`🚀 EXECUTING: ${id}`);
+            
+            // --- REAL LOGIC GOES HERE ---
+            // For example: await sendEmail(taskData.payload);
+            // For now, we simulate a successful execution.
+            console.log(`📦 Task Content:`, JSON.parse(taskData.payload));
+            
+            // ---------------------------
 
-          // 4. CLEAN UP (The Acknowledge step)
-          // We must remove the task from BOTH the Set and the Hash
-          await redisClient.zrem('tasks:scheduled', id);
-          await redisClient.del(`task:data:${id}`);
-          console.log(`🗑️  Task ${id} removed from Redis.`);
-          console.log(`-------------------------------------------`);
+            console.log(`✅ SUCCESS: Task ${id} processed.`);
+            
+            // Clean up Redis on success
+            await redisClient.zrem('tasks:scheduled', id);
+            await redisClient.del(`task:data:${id}`);
+
+          } catch (executionError: any) {
+            const currentRetries = parseInt(taskData.retries || "0");
+            const maxRetries = 3;
+
+            if (currentRetries < maxRetries) {
+              // Exponential Backoff: Wait longer each time (30s, 60s, 90s)
+              const waitTime = 30000 * (currentRetries + 1);
+              const nextAttempt = Date.now() + waitTime; 
+              
+              console.log(`⚠️  EXECUTION FAILED: ${executionError.message}`);
+              console.log(`🔄 Rescheduling ${id} in ${waitTime/1000}s...`);
+
+              await redisClient.hset(`task:data:${id}`, 'retries', currentRetries + 1);
+              await redisClient.zadd('tasks:scheduled', nextAttempt, id);
+            } else {
+              console.log(`❌ FATAL: Task ${id} failed after ${maxRetries} attempts. Purging from queue.`);
+              await redisClient.zrem('tasks:scheduled', id);
+              await redisClient.del(`task:data:${id}`);
+            }
+          }
         }
       }
     } catch (error) {
-      console.error("❌ Worker Error:", error);
+      console.error("❌ Worker Loop Error:", error);
     }
-  }, 5000); // Check every 5 seconds
+  }, 5000); 
 };
