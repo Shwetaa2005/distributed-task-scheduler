@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { TaskSchema } from './schema.js';
 import { addTask } from './queue.js';
 import { startWorker } from './worker.js';
+import redisClient from './redis.js';
 
 dotenv.config();
 const app = express();
@@ -61,6 +62,38 @@ app.post('/schedule', async (req: Request, res: Response) => {
   }
 });
 
+// New Monitoring Route
+app.get('/status', async (_req: Request, res: Response) => {
+  console.log("-> GET /status requested");
+  try {
+    const now = Date.now();
+
+    // 1. Total tasks currently in the warehouse (Sorted Set)
+    const totalTasks = await redisClient.zcard('tasks:scheduled');
+
+    // 2. Tasks whose time has passed (waiting for the worker's next poll)
+    // We count items with scores between 0 and "now"
+    const readyToExecute = await redisClient.zcount('tasks:scheduled', 0, now);
+
+    // 3. Tasks scheduled for the future
+    const upcomingTasks = totalTasks - readyToExecute;
+
+    res.json({
+      success: true,
+      systemTime: new Date().toISOString(),
+      metrics: {
+        total_tasks_in_redis: totalTasks,
+        tasks_ready_to_process: readyToExecute,
+        tasks_waiting_for_future: upcomingTasks,
+      }
+    });
+  } catch (error: any) {
+    // This line is the "Black Box" recorder - it will tell us the truth!
+    console.error("-> ❌ STATUS ROUTE CRASHED:", error.message); 
+    res.status(500).json({ error: "Could not retrieve system metrics", details: error.message });
+  }
+});
+
 // 5. Catch-all for 404s (This tells us if the route was missed)
 app.use((req, res) => {
   console.log(`-> 404: No route found for ${req.method} ${req.url}`);
@@ -73,6 +106,8 @@ app.listen(PORT, () => {
 
 // Start the Worker loop
 startWorker();
+
+
 
 app.listen(PORT, () => {
   console.log(`🚀 API Server & Worker running on http://localhost:${PORT}`);
