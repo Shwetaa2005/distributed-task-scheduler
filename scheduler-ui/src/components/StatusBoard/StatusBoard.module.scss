@@ -1,0 +1,24 @@
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+
+  .card {
+    background: #fff;
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    text-align: center;
+    border: 1px solid #eee;
+
+    span { color: #666; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+    h2 { font-size: 2.5rem; margin-top: 0.5rem; color: #222; }
+  }
+
+  .alert {
+    background: #fff5f5;
+    border-color: #feb2b2;
+    h2 { color: #c53030; }
+  }
+}
